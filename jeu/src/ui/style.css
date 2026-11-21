@@ -1,7 +1,22 @@
 /* Projet Royaume — interface (un seul thème sombre : ardoise bleutée, or blé, parchemin).
-   Toutes les couleurs sont des variables ci-dessous. Polices : Cinzel (titres) + Inter (texte),
-   avec des polices de secours installées partout (le jeu marche hors ligne). */
-@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=Inter:wght@400;500;600;700&display=swap');
+   Toutes les couleurs sont des variables ci-dessous. Polices : Cinzel (titres) + Inter (texte).
+   Elles sont dans assets/fonts/ (licence OFL, sous-ensemble latin, polices variables : un fichier
+   couvre toutes les graisses) et la fabrication les glisse dans le fichier du jeu : aucune connexion
+   nécessaire. Des polices de secours installées partout restent derrière, au cas où. */
+@font-face {
+  font-family: 'Cinzel';
+  font-style: normal;
+  font-weight: 400 900;
+  font-display: swap;
+  src: url('../../assets/fonts/cinzel-latin.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('../../assets/fonts/inter-latin.woff2') format('woff2');
+}
 
 :root {
   color-scheme: dark;
@@ -480,6 +495,23 @@ button.chip { font: inherit; color: inherit; }
 .ancre { position: absolute; left: 0; top: 0; pointer-events: auto; transform: translate(-50%, -50%); will-change: transform; }
 .ancre.piege-btn { width: 44px; height: 44px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5); }
 .ancre .ic { width: 20px; height: 20px; }
+/* ennemis hors de l'écran : chevron rouge au bord, pointé vers le groupe, avec le nombre */
+.reperes { position: absolute; inset: 0; z-index: 7; pointer-events: none; }
+.repere {
+  position: absolute; left: 0; top: 0; width: 44px; height: 44px; padding: 0; border: 0; background: none;
+  display: grid; place-items: center; pointer-events: auto; cursor: pointer; touch-action: manipulation;
+  transform: translate(-50%, -50%); will-change: transform;
+}
+.repere .n {
+  min-width: 26px; height: 26px; padding: 0 6px; border-radius: 13px;
+  background: var(--ennemi); color: #fff; border: 2px solid rgba(20, 8, 6, 0.75);
+  font: 700 13px/22px var(--police); text-align: center; font-variant-numeric: tabular-nums;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+.repere .pointe { position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px; display: grid; place-items: center; }
+.repere .pointe .ic { width: 22px; height: 22px; color: var(--ennemi); stroke-width: 3.2; filter: drop-shadow(0 0 1.5px rgba(0, 0, 0, 0.9)) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6)); }
+.repere:not([hidden]) .n { animation: repere-pouls 1.6s ease-in-out infinite; }
+@keyframes repere-pouls { 50% { box-shadow: 0 0 0 5px rgba(224, 101, 78, 0.28), 0 2px 8px rgba(0, 0, 0, 0.5); } }
 .pause-voile {
   position: absolute; inset: 0; z-index: 8; display: grid; place-items: center; pointer-events: none;
   background: rgba(8, 12, 18, 0.35);

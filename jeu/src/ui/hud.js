@@ -5,6 +5,7 @@ import { icon } from './icons.js';
 import { el, esc, nb, reduceMotion } from './dom.js';
 
 const RES = ['bois', 'pierre', 'nourriture'];
+export const MAX_REPERES = 4; // chevrons « ennemis hors de l'écran » au plus
 const ONGLETS = [
   { id: 'actions', nom: 'Actions', ic: 'actions' },
   { id: 'construire', nom: 'Construire', ic: 'construire' },
@@ -56,6 +57,7 @@ export function createHud(ui, { cmd }) {
   ennemis.style.color = 'var(--texte)';
   ennemis.querySelector('.ic').style.color = 'var(--ennemi)';
   const ennemisV = ennemis.querySelector('.v');
+  const ennemisLbl = ennemis.querySelector('.lbl');
   const ennemisBarre = ennemis.querySelector('.barre > i');
   const vitesseBtn = el('button', 'btn btn-icone vitesse', `${icon('vitesse')}`);
   vitesseBtn.type = 'button';
@@ -115,11 +117,26 @@ export function createHud(ui, { cmd }) {
   const infoMode = el('div', 'info-mode passif');
   infoMode.hidden = true;
 
+  // ennemis hors de l'écran : petits chevrons rouges au bord, vers le groupe, avec leur nombre.
+  // Toucher un chevron y amène la caméra.
+  const reperes = el('div', 'reperes');
+  const repereEls = [];
+  for (let i = 0; i < MAX_REPERES; i++) {
+    const r = el('button', 'repere', `<span class="pointe">${icon('chevron')}</span><b class="n">0</b>`);
+    r.type = 'button';
+    r.dataset.cmd = 'repere';
+    r.dataset.i = String(i);
+    r.dataset.key = `repere-${i}`;
+    r.hidden = true;
+    reperes.append(r);
+    repereEls.push({ el: r, pointe: r.querySelector('.pointe'), n: r.querySelector('.n'), x: NaN, y: NaN, a: NaN, count: -1 });
+  }
+
   const toasts = el('div', 'toasts passif');
   toasts.setAttribute('role', 'status');
   toasts.setAttribute('aria-live', 'polite');
 
-  ui.append(ancres, voilePause, hud, dock, cta, battlebar, infoMode, toasts);
+  ui.append(ancres, reperes, voilePause, hud, dock, cta, battlebar, infoMode, toasts);
 
   // --- état d'affichage -------------------------------------------------------------------------
   let mode = 'titre';
@@ -136,6 +153,8 @@ export function createHud(ui, { cmd }) {
     cta.hidden = m !== 'prep';
     battlebar.hidden = m !== 'bataille';
     ancres.hidden = m !== 'bataille';
+    reperes.hidden = m !== 'bataille';
+    if (m !== 'bataille') updateReperes(null, 0);
     const bataille = m === 'bataille';
     hud.classList.toggle('bataille', bataille);
     ennemis.hidden = vitesseBtn.hidden = pauseBtn.hidden = !bataille;
@@ -276,6 +295,7 @@ export function createHud(ui, { cmd }) {
     if (b.remaining !== restants) {
       restants = b.remaining;
       setText(ennemisV, String(b.remaining));
+      setText(ennemisLbl, b.remaining > 1 ? 'restants' : 'restant');
       ennemis.setAttribute('aria-label', `Ennemis restants : ${b.remaining} sur ${b.total}`);
       ennemisBarre.style.width = `${b.total ? Math.round((1 - b.remaining / b.total) * 100) : 0}%`;
     }
@@ -309,6 +329,32 @@ export function createHud(ui, { cmd }) {
     }
   }
 
+  /**
+   * Chevrons des ennemis hors de l'écran (aucune allocation : seuls les `n` premiers sont lus).
+   * @param {{x:number, y:number, angle:number, count:number}[]|null} list position au bord (px de la toile),
+   *   direction du groupe (radians, 0 = vers la droite), nombre d'ennemis
+   * @param {number} n
+   */
+  function updateReperes(list, n) {
+    for (let i = 0; i < MAX_REPERES; i++) {
+      const e = repereEls[i];
+      const on = !!list && i < n;
+      if (e.el.hidden !== !on) e.el.hidden = !on;
+      if (!on) continue;
+      const r = list[i];
+      const x = Math.round(r.x);
+      const y = Math.round(r.y);
+      const a = Math.round(r.angle * 20) / 20;
+      if (x !== e.x || y !== e.y) { e.x = x; e.y = y; e.el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%)`; }
+      if (a !== e.a) { e.a = a; e.pointe.style.transform = `rotate(${a}rad) translateX(21px)`; }
+      if (r.count !== e.count) {
+        e.count = r.count;
+        e.n.textContent = String(r.count);
+        e.el.setAttribute('aria-label', `${r.count} ${r.count > 1 ? 'ennemis approchent' : 'ennemi approche'} hors de vue : y regarder`);
+      }
+    }
+  }
+
   /** Petit message en haut de l'écran (2 au plus quand un panneau est ouvert en portrait). */
   function toast(text, kind = '', ic = 'info') {
     const t = el('div', `toast ${kind}`, `${icon(ic)}<span>${esc(text)}</span>`);
@@ -333,7 +379,7 @@ export function createHud(ui, { cmd }) {
 
   setMode('titre');
   return {
-    setMode, update, updateBattle, setSheet, setCovered, setMoveArmed, setPaused, setSpeed, toast, banner,
+    setMode, update, updateBattle, updateReperes, setSheet, setCovered, setMoveArmed, setPaused, setSpeed, toast, banner,
     get mode() { return mode; },
     els: { hud, dock, cta, battlebar, tabs: tabEls, bouger, pieges, chips },
     nb,

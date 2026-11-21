@@ -1131,6 +1131,27 @@ describe('bataille', () => {
     assert.equal(C.startBattle(state).ok, false);
   });
 
+  test('forceDegats : les ennemis frappent plus fort nos soldats, pas nos murs', () => {
+    const i = C.VAGUES.findIndex((v) => (v.forceDegats ?? 1) > 1);
+    assert.ok(i >= 0, 'au moins une vague avec forceDegats');
+    const v = C.VAGUES[i];
+    const s = C.newGame(null, { seed: 3 });
+    const b = C.createBattle(s, i);
+    for (let n = 0; n < 30 * 3 && !b.units.some((u) => u.side === 'enemy'); n++) C.stepBattle(b);
+    const e = b.units.find((u) => u.side === 'enemy');
+    const def = C.ENNEMIS[e.type];
+    assert.equal(e.dmg, def.degats * v.forceDegats);
+    assert.equal(e.dmgB, def.degatsBatiments ?? def.degats);
+    assert.equal(e.maxHp, Math.round(def.pv * (v.force ?? 1)));
+  });
+
+  test('la difficulté monte de vague en vague jusqu’à la 9e, la 10e garde le chef de guerre', () => {
+    // « dureté » grossière : PV totaux × dégâts (les deux multiplicateurs de la vague)
+    const durete = (v) => v.groupes.reduce((n, g) => n + g.count * C.ENNEMIS[g.type].pv, 0) * (v.force ?? 1) * (v.forceDegats ?? 1);
+    for (let i = 1; i < 9; i++) assert.ok(durete(C.VAGUES[i]) > durete(C.VAGUES[i - 1]), `vague ${i + 1} pas plus dure que la ${i}`);
+    assert.ok(C.VAGUES[9].groupes.some((g) => g.type === 'chef_de_guerre'));
+  });
+
   test('aperçu de vague', () => {
     const v1 = C.wavePreview(0);
     assert.deepEqual(v1.groupes, [{ type: 'pillard', nom: 'Pillard', count: 4 }]);

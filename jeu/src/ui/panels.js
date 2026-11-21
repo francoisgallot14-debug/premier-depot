@@ -44,7 +44,7 @@ export function resumeVague(index) {
   for (let i = 0; i < index; i++) for (const g of C.VAGUES[i].groupes) deja.add(g.type);
   const nouveaux = p.groupes.filter((g) => !deja.has(g.type));
   let resume = p.groupes.length === 1 ? `${p.total} ${nomEnnemi(p.groupes[0].type, p.total)}` : `${p.total} ennemis`;
-  if (index > 0 && nouveaux.length) resume += ` · nouveau : ${nouveaux.map((g) => nomEnnemi(g.type, 2)).join(', ')}`;
+  if (index > 0 && nouveaux.length) resume += ` · nouveau : ${nouveaux.map((g) => nomEnnemi(g.type, g.count)).join(', ')}`;
   const detail = p.groupes.map((g) => `${g.count} ${nomEnnemi(g.type, g.count)}`).join(', ');
   return { numero: p.numero, total: p.total, resume, detail };
 }
@@ -427,12 +427,13 @@ export function createPanels(ui, { get }) {
     return `<ul class="lignes">${h}</ul>`;
   }
 
-  function blocXp(r, meta) {
+  /** ou : où dépenser les points depuis cet écran (bilan : l'onglet du bas ; fin de partie : le bouton). */
+  function blocXp(r, meta, ou = 'onglet Royaume') {
     if (!r.xp) return '';
     const lp = C.levelProgress(meta);
     let h = `<div class="section" style="margin-top:16px">Royaume</div><div class="bloc xp"><div class="niv">${meta.level}</div><div class="det"><b>+${r.xp.gained} XP</b>
       <div class="barre"><i style="width:${Math.round(lp.ratio * 100)}%"></i></div><span>${lp.xpInLevel} / ${lp.xpNeeded} XP vers le niveau ${meta.level + 1}</span></div></div>`;
-    if (r.xp.levelUp) h += `<div class="niveau-sup">${icon('hausse')}Niveau ${r.xp.level} ! +${pluriel(r.xp.levelsGained * C.META.pointsParNiveau, 'point', 'points')} de talent (onglet Royaume)</div>`;
+    if (r.xp.levelUp) h += `<div class="niveau-sup">${icon('hausse')}Niveau ${r.xp.level} ! +${pluriel(r.xp.levelsGained * C.META.pointsParNiveau, 'point', 'points')} de talent (${ou})</div>`;
     return h;
   }
 
@@ -463,14 +464,21 @@ export function createPanels(ui, { get }) {
     return openModal('bilan', html, { cls: 'bilan large', closable: false });
   }
 
+  /** Bouton « Royaume » des écrans de fin : les talents se dépensent tout de suite, pour la partie suivante. */
+  function boutonRoyaume(meta) {
+    const pts = meta.talentPoints;
+    return `<button type="button" class="btn${pts ? ' btn-attention' : ''}" data-cmd="fin-royaume" data-key="fin-royaume">${icon('etoile', 'ic-or')}<span class="multi">Royaume<small>${pts ? pluriel(pts, 'point', 'points') : `niveau ${meta.level}`}</small></span></button>`;
+  }
+  const OU_FIN = 'bouton « Royaume » ci-dessous';
+
   /** Écran de défaite. */
   function openDefeat(r, meta) {
     const html = `<div class="fenetre-corps apparait"><div class="entete"><div class="embleme rouge">${icon('crane')}</div><h2>Le village est tombé</h2>
       <p class="sous">Vague ${r.wave} sur ${r.wavesTotal}. Le royaume garde son expérience.</p>${statsCombat(r)}</div>
-      <div>${blocXp(r, meta)}</div>
+      <div>${blocXp(r, meta, OU_FIN)}</div>
       <div><div class="section" style="margin-top:16px">Et maintenant ?</div><p class="note">Le niveau du royaume, ses talents et ses réserves servent à la prochaine partie. Courage !</p></div></div>
       <div class="fenetre-pied"><button type="button" class="btn btn-or btn-large" data-cmd="recommencer" data-key="recommencer">Recommencer le chapitre</button>
-      <button type="button" class="btn" data-cmd="titre" data-key="vers-titre">Écran titre</button></div>`;
+      <div class="rangee">${boutonRoyaume(meta)}<button type="button" class="btn" data-cmd="titre" data-key="vers-titre">Écran titre</button></div></div>`;
     return openModal('defaite', html, { cls: 'defaite large', closable: false });
   }
 
@@ -484,10 +492,10 @@ export function createPanels(ui, { get }) {
       <div class="stats"><div class="stat bon"><div class="v">${icon('crane')}${st.kills}</div><div class="l">${st.kills > 1 ? 'ennemis tués' : 'ennemi tué'}</div></div>
       <div class="stat"><div class="v">${icon('villageois')}${pop}</div><div class="l">${pop > 1 ? 'habitants' : 'habitant'}</div></div>
       <div class="stat"><div class="v">${icon('maison')}${debout}</div><div class="l">${debout > 1 ? 'bâtiments debout' : 'bâtiment debout'}</div></div></div></div>
-      <div>${blocXp(r, meta)}<p class="note">Soldats perdus pendant le chapitre : ${st.soldiersLost} · bâtiments perdus : ${st.buildingsLost}.</p></div>
+      <div>${blocXp(r, meta, OU_FIN)}<p class="note">Soldats perdus pendant le chapitre : ${st.soldiersLost} · bâtiments perdus : ${st.buildingsLost}.</p></div>
       <div>${blocMissions(r)}</div></div>
       <div class="fenetre-pied"><button type="button" class="btn btn-or btn-large" data-cmd="recommencer" data-key="rejouer">Rejouer le chapitre</button>
-      <button type="button" class="btn" data-cmd="titre" data-key="vers-titre">Écran titre</button></div>`;
+      <div class="rangee">${boutonRoyaume(meta)}<button type="button" class="btn" data-cmd="titre" data-key="vers-titre">Écran titre</button></div></div>`;
     return openModal('victoire', html, { cls: 'bilan large', closable: false });
   }
 

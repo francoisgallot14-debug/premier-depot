@@ -145,7 +145,8 @@ export function createBattle(state, waveIndex = state.wave) {
     spawnQueue: [],
     spawnTimer: COMBAT.delaiPremierEnnemi,
     spawnInterval: vague.intervalle,
-    force: vague.force ?? 1,
+    force: vague.force ?? 1,              // × PV des ennemis
+    forceDegats: vague.forceDegats ?? 1,  // × dégâts des ennemis contre nos soldats
     totalEnemies: 0,
     spawned: 0,
     kills: 0,
@@ -631,8 +632,8 @@ function etapeApparition(battle, dt) {
     z: spawn.z - 0.4 + oz,
     hp: pv,
     maxHp: pv,
-    dmg: def.degats,
-    dmgB: def.degatsBatiments ?? def.degats,
+    dmg: def.degats * battle.forceDegats,
+    dmgB: def.degatsBatiments ?? def.degats, // les murs ne s'usent pas plus vite : seuls les soldats souffrent
     cadence: def.cadence,
     range: def.portee,
     rangeB: def.porteeBatiments ?? def.portee,

@@ -1,11 +1,15 @@
-// Équilibrage : quatre robots jouent le chapitre 1 sans affichage.
+// Équilibrage : des robots jouent le chapitre 1 sans affichage.
 //   passif      : ne construit rien (doit perdre tôt)
-//   raisonnable : ordre de construction simple et sensé, garde une petite armée et la poste derrière
-//                 le premier mur (doit gagner les 10 vagues, avec des pertes)
+//   raisonnable : ordre de construction simple et sensé, garde une petite armée (comble ses pertes)
+//                 et la poste derrière le premier mur. Leviers « humains » : il voit un attroupement
+//                 sur un piège, réagit en 1,5 à 3 s, oublie parfois (doit gagner ≥ 90 % des parties)
+//   sans_pieges : le même, sans construire ni toucher aucun piège (doit pouvoir gagner, moins souvent)
+//   parfait     : le même avec des réflexes de robot (pièges vérifiés chaque 1/30 s) : un plafond
 //   econome     : économie d'abord, défense tardive (jouable mais plus risqué)
 //   tours       : même ordre que raisonnable mais l'armée est négligée (tous au travail, drapeau jamais
 //                 déplacé) : doit s'en sortir moins bien, sinon l'armée ne sert à rien
-// Usage : npm run balance   (option --seeds=10, --detail pour toutes les graines, --strict pour échouer si les cibles ne tiennent pas)
+// Usage : npm run balance   (options --seeds=40, --detail pour toutes les graines, --strict pour échouer
+//         si les cibles ne tiennent pas, --robots=raisonnable,parfait, --tueurs : qui tue nos soldats)
 
 import * as C from '../src/core/index.js';
 
@@ -21,8 +25,11 @@ const DETAIL = !!opt('detail', false);
 const STRICT = !!opt('strict', false);
 const TRACE = opt('trace', false); // --trace=raisonnable : détail de chaque préparation
 const TRACE_BATAILLE = String(opt('bataille', '')); // --bataille=raisonnable:7:6 : événements d'une bataille
+const TUEURS = !!opt('tueurs', false); // --tueurs : qui tue nos soldats, vague par vague (robot raisonnable)
+const SEULS = opt('robots', ''); // --robots=raisonnable,sans_pieges : ne faire jouer que ceux-là
 
 const map = C.getMap(1);
+const tueurs = {}; // vague → { type d'ennemi → soldats tués }
 const P = map.path;
 
 // ---------------------------------------------------------------------
@@ -110,18 +117,64 @@ function utiliserActions(state, besoin) {
   }
 }
 
-// Déclenche les pièges quand plusieurs ennemis (ou un costaud) sont dessus.
-function leviersPieges(battle) {
-  for (const b of battle.buildings) {
-    if (!b.trap || !b.trap.ready || b.destroyed) continue;
-    let n = 0;
-    let gros = false;
-    for (const u of battle.units) {
-      if (u.side !== 'enemy' || u.state === 'dead') continue;
-      if (Math.hypot(u.x - b.x, u.z - b.z) <= b.trap.radius + 0.3) { n++; if (u.hp >= 35) gros = true; }
+// Leviers « parfaits » : regarde les pièges à chaque pas (1/30 s) et déclenche dès que plusieurs
+// ennemis (ou un costaud) sont dessus. Aucun joueur ne fait ça : sert seulement de plafond.
+function leviersParfaits() {
+  return (battle) => {
+    for (const b of battle.buildings) {
+      if (!b.trap || !b.trap.ready || b.destroyed) continue;
+      let n = 0;
+      let gros = false;
+      for (const u of battle.units) {
+        if (u.side !== 'enemy' || u.state === 'dead') continue;
+        if (Math.hypot(u.x - b.x, u.z - b.z) <= b.trap.radius + C.COMBAT.margeRayonPiege) { n++; if (u.hp >= 35) gros = true; }
+      }
+      if (n >= 3 || (n >= 1 && gros) || (n >= 2 && battle.time > 0)) C.triggerTrap(battle, b.id);
     }
-    if (n >= 3 || (n >= 1 && gros) || (n >= 2 && battle.time > 0)) C.triggerTrap(battle, b.id);
+  };
+}
+
+// Leviers « humains » : un vrai joueur voit un attroupement sur un piège, met un moment à
+// réagir, et parfois ne le voit pas (il regardait ailleurs, il zoomait…).
+const HUMAIN = {
+  reaction: [1.5, 3],    // secondes entre « je vois » et « j'ai touché le piège » (tirées par graine)
+  oubli: 0.25,           // chance de rater une occasion
+  distraction: [4, 9],   // secondes avant de regarder à nouveau ce piège après un oubli
+  minEnnemis: 2,         // déclenche s'il voit au moins 2 ennemis dans le rayon…
+  grosses: ['belier', 'chef_de_guerre'], // … ou une grosse cible
+};
+
+function ciblesSurPiege(battle, b) {
+  let n = 0;
+  let gros = false;
+  for (const u of battle.units) {
+    if (u.side !== 'enemy' || u.state === 'dead') continue;
+    if (Math.hypot(u.x - b.x, u.z - b.z) <= b.trap.radius + C.COMBAT.margeRayonPiege) {
+      n++;
+      if (HUMAIN.grosses.includes(u.type)) gros = true;
+    }
   }
+  return n >= HUMAIN.minEnnemis || gros;
+}
+
+function leviersHumains(graine, vague) {
+  const rng = C.createRng(C.mixSeeds(graine, vague, 'leviers'));
+  const suivi = new Map(); // piège → { etat: 'guette' | 'vise' | 'distrait', t }
+  return (battle) => {
+    for (const b of battle.buildings) {
+      if (!b.trap || b.destroyed) continue;
+      let p = suivi.get(b.id);
+      if (!p) { p = { etat: 'guette', t: 0 }; suivi.set(b.id, p); }
+      if (!b.trap.ready) { p.etat = 'guette'; continue; }
+      if (p.etat === 'distrait' && battle.time >= p.t) p.etat = 'guette';
+      if (p.etat === 'guette' && ciblesSurPiege(battle, b)) {
+        if (rng.chance(HUMAIN.oubli)) p = Object.assign(p, { etat: 'distrait', t: battle.time + rng.range(...HUMAIN.distraction) });
+        else p = Object.assign(p, { etat: 'vise', t: battle.time + rng.range(...HUMAIN.reaction) });
+      }
+      // le doigt touche le piège : il part, même si les ennemis ont bougé entre-temps
+      if (p.etat === 'vise' && battle.time >= p.t) { C.triggerTrap(battle, b.id); p.etat = 'guette'; }
+    }
+  };
 }
 
 // Exécute une liste de souhaits dans l'ordre ; s'arrête dès qu'il faut économiser.
@@ -136,8 +189,26 @@ function suivrePlan(state, plan) {
   return null;
 }
 
-function recruterEtEquiper(state, cible) {
-  while (state.soldiers.length < cible && C.freeVillagers(state) > 0) {
+// Retire un ouvrier pour en faire un soldat, sans faire passer la nourriture dans le rouge.
+function libererOuvrier(state) {
+  for (const type of ['carriere', 'bucheron', 'chasseur', 'champ']) {
+    for (const b of state.buildings.filter((x) => x.type === type && !x.destroyed && x.workers > 0)) {
+      if (!C.assign(state, b.id, -1).ok) continue;
+      if (C.productionForecast(state).soldeNourriture >= 0) return true;
+      C.assign(state, b.id, +1);
+    }
+  }
+  return false;
+}
+
+/** Recrute jusqu'à `cible` soldats. `retirer` : un joueur sensé retire un ouvrier pour combler les pertes. */
+function recruterEtEquiper(state, cible, retirer = false) {
+  while (state.soldiers.length < cible) {
+    if (C.freeVillagers(state) === 0) {
+      const place = state.soldiers.length < C.soldierCapacity(state) && C.hasBuilding(state, 'caserne')
+        && C.canAfford(state, C.recruitCost(state, 'fantassin'));
+      if (!retirer || !place || !libererOuvrier(state)) break;
+    }
     const archers = state.soldiers.filter((s) => s.kind === 'archer').length;
     const kind = C.hasBuilding(state, 'atelier') && archers < Math.floor(state.soldiers.length / 3) ? 'archer' : 'fantassin';
     if (!C.recruit(state, kind).ok && !C.recruit(state, 'fantassin').ok) break;
@@ -196,17 +267,20 @@ const PLAN_RAISONNABLE = [
   ['tour_pierre', 6, tour('tour_pierre')],
 ];
 
+// Même plan sans aucun piège (le bois va au reste).
+const PLAN_SANS_PIEGES = PLAN_RAISONNABLE.filter(([type]) => type !== 'piege');
+
 /**
  * Préparation sensée. `armee` : garde une petite armée (recrutée avant de distribuer les emplois)
  * et poste le drapeau derrière le premier mur ; sinon tout le monde travaille et le drapeau ne bouge pas.
  */
-function prepRaisonnable(state, armee) {
+function prepRaisonnable(state, armee, plan = PLAN_RAISONNABLE) {
   reconstruireRuines(state);
-  if (armee) recruterEtEquiper(state, 3 + Math.floor(Math.max(0, state.wave - 2) / 2));
+  if (armee) recruterEtEquiper(state, 3 + Math.floor(Math.max(0, state.wave - 2) / 2), true);
   placerOuvriers(state);
-  const besoin = suivrePlan(state, PLAN_RAISONNABLE);
+  const besoin = suivrePlan(state, plan);
   utiliserActions(state, besoin);
-  suivrePlan(state, PLAN_RAISONNABLE);
+  suivrePlan(state, plan);
   placerOuvriers(state);
   recruterEtEquiper(state, 3 + Math.max(0, state.wave - 2));
   placerOuvriers(state);
@@ -224,13 +298,28 @@ const ROBOTS = {
       while (state.actionsLeft > 0 && C.doAction(state, 'chasser').ok);
       while (state.actionsLeft > 0 && C.doAction(state, 'couper_bois').ok);
     },
-    bataille() {},
+    leviers: null,
   },
 
+  // Le robot de référence : joue comme un humain attentif (réaction 1,5–3 s, oublis).
   raisonnable: {
     nom: 'raisonnable',
     prep(state) { prepRaisonnable(state, true); },
-    bataille: leviersPieges,
+    leviers: leviersHumains,
+  },
+
+  // Même jeu, sans construire ni toucher aucun piège : les pièges aident, ils ne sont pas obligatoires.
+  sans_pieges: {
+    nom: 'sans_pieges',
+    prep(state) { prepRaisonnable(state, true, PLAN_SANS_PIEGES); },
+    leviers: null,
+  },
+
+  // Même jeu avec des réflexes parfaits (chaque 1/30 s) : un plafond, pas une cible.
+  parfait: {
+    nom: 'parfait',
+    prep(state) { prepRaisonnable(state, true); },
+    leviers: leviersParfaits,
   },
 
   econome: {
@@ -279,13 +368,13 @@ const ROBOTS = {
       recruterEtEquiper(state, 3 + Math.max(0, state.wave - 3) * 2);
       placerOuvriers(state);
     },
-    bataille: leviersPieges,
+    leviers: leviersHumains,
   },
 
   tours: {
     nom: 'tours',
     prep(state) { prepRaisonnable(state, false); },
-    bataille: leviersPieges,
+    leviers: leviersHumains,
   },
 };
 
@@ -309,6 +398,7 @@ function jouer(robot, graine) {
     const tours = state.buildings.filter((b) => !b.destroyed && C.BATIMENTS[b.type].tour && b.type !== 'maison_commune').length;
     const r = C.startBattle(state);
     if (!r.ok) throw new Error(r.reason);
+    const levier = robot.leviers ? robot.leviers(graine, vague) : null;
     const tracer = TRACE_BATAILLE === `${robot.nom}:${graine}:${vague}`;
     if (tracer) {
       console.log(`[bataille ${vague}] ${state.buildings.map((b) => `${b.type}@${b.x},${b.z}`).join(' ')}`);
@@ -318,10 +408,18 @@ function jouer(robot, graine) {
     const degats = { tower: 0, melee: 0, arrow: 0, trap: 0 };
     C.runBattle(r.battle, {
       onStep: (b) => {
-        robot.bataille(b, state);
+        if (levier) levier(b);
         const h = b.buildings.find((x) => x.type === 'maison_commune');
         if (h) pvMin = Math.min(pvMin, h.hp / h.maxHp);
         for (const e of b.events) {
+          if (TUEURS && robot.nom === 'raisonnable' && e.type === 'hit' && e.side === 'ally') {
+            const cible = b.unitIndex.get(e.targetId);
+            const source = b.unitIndex.get(e.sourceId);
+            if (cible && cible.hp <= 0 && source) {
+              const t = (tueurs[vague] ??= {});
+              t[source.type] = (t[source.type] || 0) + 1;
+            }
+          }
           if (e.type !== 'hit' || e.side !== 'enemy' || !(e.cause in degats)) continue;
           const u = b.unitIndex.get(e.targetId);
           degats[e.cause] += u ? e.amount + Math.min(0, u.hp) : e.amount; // sans le surplus du coup fatal
@@ -353,6 +451,7 @@ function jouer(robot, graine) {
       pop: C.population(state),
       duree: Math.round(r.battle.time),
       partArmee: (degats.melee + degats.arrow) / Math.max(1, degats.tower + degats.melee + degats.arrow + degats.trap),
+      partPieges: degats.trap / Math.max(1, degats.tower + degats.melee + degats.arrow + degats.trap),
     });
     if (state.phase === 'report') C.continueToPrep(state);
   }
@@ -382,11 +481,12 @@ function tableau(nom, graine, res) {
 
 const graines = Array.from({ length: NB_GRAINES }, (_, i) => i + 1);
 const bilan = {};
-for (const nom of Object.keys(ROBOTS)) {
+const joueurs = Object.keys(ROBOTS).filter((nom) => !SEULS || String(SEULS).split(',').includes(nom));
+for (const nom of joueurs) {
   const resultats = graines.map((g) => jouer(ROBOTS[nom], g));
   bilan[nom] = resultats;
   if (DETAIL) resultats.forEach((r, i) => tableau(nom, graines[i], r));
-  else tableau(nom, graines[0], resultats[0]);
+  else if (!SEULS) tableau(nom, graines[0], resultats[0]);
 }
 
 console.log(`\n=== Résumé sur ${NB_GRAINES} graines`);
@@ -399,41 +499,69 @@ for (const [nom, rs] of Object.entries(bilan)) {
   console.log(` ${nom.padEnd(12)} | ${pad(`${v}/${rs.length}`, 9)} | ${pad(`${Math.min(...vs)}–${Math.max(...vs)}`, 23)} | ${pad(sp.toFixed(1), 21)} | ${pad(bp.toFixed(1), 23)}`);
 }
 
-// Tension du robot raisonnable, vague par vague
-{
-  const rs = bilan.raisonnable;
+// Tension vague par vague (robot raisonnable en détail ; les autres pour comparer)
+function tension(nom, complet) {
+  const rs = bilan[nom];
   const parVague = (f) => Array.from({ length: 10 }, (_, v) => {
     const ls = rs.map((r) => r.lignes[v]).filter(Boolean);
     return ls.length ? f(ls) : '  -';
   }).join(' ');
-  console.log('\n=== Tension du robot raisonnable (vagues 1 à 10)');
+  console.log(`\n=== Tension : ${nom} (vagues 1 à 10)`);
   console.log(' Maison touchée (% des graines) :', parVague((ls) => pad(Math.round((100 * ls.filter((l) => l.maisonTouchee).length) / ls.length), 3)));
   console.log(' Soldats perdus (moyenne)       :', parVague((ls) => pad((ls.reduce((n, l) => n + l.soldatsPerdus, 0) / ls.length).toFixed(1), 3)));
+  if (!complet) return;
+  console.log(' Bâtiments perdus (moyenne)     :', parVague((ls) => pad((ls.reduce((n, l) => n + l.batimentsPerdus, 0) / ls.length).toFixed(1), 3)));
   console.log(' Dégâts faits par l’armée (%)   :', parVague((ls) => pad(Math.round((100 * ls.reduce((n, l) => n + l.partArmee, 0)) / ls.length), 3)));
+  console.log(' Dégâts faits par les pièges (%):', parVague((ls) => pad(Math.round((100 * ls.reduce((n, l) => n + l.partPieges, 0)) / ls.length), 3)));
 }
+if (bilan.raisonnable) tension('raisonnable', true);
+if (TUEURS) for (const [v, t] of Object.entries(tueurs)) console.log(` vague ${v} : soldats tués par`, JSON.stringify(t));
+for (const nom of ['sans_pieges', 'parfait', 'tours', 'econome']) if (bilan[nom]) tension(nom, false);
 
-// Cibles d'équilibrage (SPEC §12)
+// Cibles d'équilibrage (SPEC §12). Chaque cible dit de quels robots elle a besoin.
 const moy = (rs, f) => rs.reduce((n, r) => n + f(r), 0) / rs.length;
+const victoires = (nom) => bilan[nom].filter((r) => r.gagne).length;
+// moyenne d'une valeur de ligne sur les vagues [v0, v1] (numéros 1 à 10), parties perdues comprises
+const moyVagues = (nom, v0, v1, f) => {
+  const ls = bilan[nom].flatMap((r) => r.lignes.filter((l) => l.vague >= v0 && l.vague <= v1));
+  return ls.length ? ls.reduce((n, l) => n + f(l), 0) / ls.length : 0;
+};
+const touchee = (nom, v0, v1) => bilan[nom].filter((r) => r.lignes.some((l) => l.vague >= v0 && l.vague <= v1 && l.maisonTouchee)).length;
+const N = NB_GRAINES;
 const cibles = [
-  ['passif perd tôt (avant la vague 5)', bilan.passif.every((r) => !r.gagne && r.vagues < 4)],
-  ['raisonnable gagne les 10 vagues', bilan.raisonnable.every((r) => r.gagne)],
-  // Tension : murs et palissades ne comptent pas (ils sont faits pour tomber).
-  ['raisonnable : Maison touchée sur une des vagues 8–10 dans ≥ 20 % des graines',
-    bilan.raisonnable.filter((r) => r.lignes.slice(7).some((l) => l.maisonTouchee)).length >= 0.2 * bilan.raisonnable.length],
-  ['raisonnable : des soldats tombent avant la vague 10', bilan.raisonnable.some((r) => r.lignes.slice(0, 9).some((l) => l.soldatsPerdus > 0))],
-  ['econome est jouable (gagne au moins une partie)', bilan.econome.some((r) => r.gagne)],
-  ['econome est plus risqué que raisonnable',
-    bilan.econome.some((r) => !r.gagne)
-    || moy(bilan.econome, (r) => r.soldatsPerdus + r.batimentsPerdus) > moy(bilan.raisonnable, (r) => r.soldatsPerdus + r.batimentsPerdus)],
+  [['passif'], 'passif perd tôt (avant la vague 5)', () => bilan.passif.every((r) => !r.gagne && r.vagues < 4)],
+  [['raisonnable'], `raisonnable (leviers humains) gagne au moins 90 % des parties (${Math.ceil(0.9 * N)}/${N})`,
+    () => victoires('raisonnable') >= Math.ceil(0.9 * N)],
+  [['raisonnable'], 'raisonnable : des soldats tombent dès la vague 6 (≥ 0,3 par vague en moyenne sur les vagues 6 à 9)',
+    () => [6, 7, 8, 9].every((v) => moyVagues('raisonnable', v, v, (l) => l.soldatsPerdus) >= 0.3)],
+  // Tension : murs et palissades ne comptent pas (ils sont faits pour tomber), la Maison commune si.
+  [['raisonnable'], 'raisonnable : Maison touchée sur une des vagues 8–10 dans ≥ 20 % des graines, et déjà avant la 10e dans certaines',
+    () => touchee('raisonnable', 8, 10) >= 0.2 * N && touchee('raisonnable', 8, 9) >= 1],
+  // La dernière vague est un sommet, pas un mur : ses pertes restent dans la suite des précédentes.
+  [['raisonnable'], 'raisonnable : vague 10 = sommet, pas un mur (pertes ≤ 2,5 × la moyenne des vagues 7–9, Maison touchée ≤ 60 %)',
+    () => moyVagues('raisonnable', 10, 10, (l) => l.soldatsPerdus) <= 2.5 * Math.max(0.4, moyVagues('raisonnable', 7, 9, (l) => l.soldatsPerdus))
+      && touchee('raisonnable', 10, 10) <= 0.6 * N],
+  [['raisonnable'], 'raisonnable : l’armée fait au moins 20 % des dégâts des vagues 5–9',
+    () => moyVagues('raisonnable', 5, 9, (l) => l.partArmee) >= 0.2],
+  // Les réflexes ne font pas tout : un humain (1,5–3 s, oublis) gagne presque autant qu'un robot parfait.
+  [['raisonnable', 'parfait'], 'leviers humains ≈ leviers parfaits (au plus 2 victoires d’écart)',
+    () => victoires('parfait') - victoires('raisonnable') <= 2],
+  // Les pièges aident, ils ne sont pas obligatoires.
+  [['sans_pieges', 'raisonnable'], 'sans aucun piège : on peut gagner, mais moins souvent',
+    () => victoires('sans_pieges') >= 1 && victoires('sans_pieges') < victoires('raisonnable')],
+  [['econome'], 'econome est jouable (gagne au moins une partie)', () => victoires('econome') >= 1],
+  [['econome', 'raisonnable'], 'econome est plus risqué que raisonnable',
+    () => victoires('econome') < victoires('raisonnable')
+      || moy(bilan.econome, (r) => r.soldatsPerdus + r.batimentsPerdus) > moy(bilan.raisonnable, (r) => r.soldatsPerdus + r.batimentsPerdus)],
   // L'armée doit compter : des tours seules (armée négligée) s'en sortent moins bien.
-  ['tours seules (armée négligée) : plus de bâtiments perdus que raisonnable',
-    moy(bilan.tours, (r) => r.batimentsPerdus + (r.gagne ? 0 : 10)) > moy(bilan.raisonnable, (r) => r.batimentsPerdus + (r.gagne ? 0 : 10))],
-  ['raisonnable : l’armée fait au moins 20 % des dégâts des vagues 5–9',
-    moy(bilan.raisonnable, (r) => r.lignes.slice(4, 9).reduce((n, l) => n + l.partArmee, 0) / Math.max(1, r.lignes.slice(4, 9).length)) >= 0.2],
+  [['tours', 'raisonnable'], 'tours seules (armée négligée) : plus de bâtiments perdus que raisonnable',
+    () => moy(bilan.tours, (r) => r.batimentsPerdus + (r.gagne ? 0 : 10)) > moy(bilan.raisonnable, (r) => r.batimentsPerdus + (r.gagne ? 0 : 10))],
 ];
 console.log('\n=== Cibles');
 let toutBon = true;
-for (const [texte, okc] of cibles) {
+for (const [robots, texte, test] of cibles) {
+  if (!robots.every((nom) => bilan[nom])) continue; // robot pas joué (--robots=…)
+  const okc = test();
   console.log(` ${okc ? '[ok]' : '[ÉCHEC]'} ${texte}`);
   if (!okc) toutBon = false;
 }

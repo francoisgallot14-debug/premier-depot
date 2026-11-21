@@ -1,7 +1,8 @@
 // Test de bout en bout : ouvre dist/royaume.html (file://) dans Chromium, en portrait puis en paysage,
 // et joue un premier cycle comme un joueur : actions, bûcheron + ouvrier, palissade SUR la route,
 // piège, vague 1 en ×2, armée déplacée, piège déclenché, bilan, Continuer, puis rechargement de
-// la page et « Continuer » sur l'écran titre. Échoue à la moindre erreur dans la console.
+// la page et « Continuer » sur l'écran titre. Réseau coupé (le jeu se joue hors ligne) : échoue à la
+// moindre erreur dans la console, à la moindre requête vers l'extérieur, ou si les polices manquent.
 // Lancer : npm run build && npm run smoke      Captures : test-output/smoke/
 import { createRequire } from 'node:module';
 import { existsSync, mkdirSync } from 'node:fs';
@@ -46,8 +47,9 @@ async function scenario(browser, o) {
   page.on('console', (m) => { if (m.type() === 'error') erreurs.push(`console : ${m.text()}`); });
   page.on('pageerror', (e) => erreurs.push(`exception : ${e.message}`));
   page.on('dialog', async (d) => { erreurs.push(`fenêtre du navigateur interdite (${d.type()}) : ${d.message()}`); await d.dismiss(); });
-  // le jeu doit marcher hors ligne : les polices en ligne sont remplacées par rien
-  await page.route(/^https?:\/\//, (r) => r.fulfill({ status: 200, contentType: 'text/css', body: '' }));
+  // le jeu doit marcher hors ligne : réseau coupé, et la moindre requête vers l'extérieur est une faute
+  await context.setOffline(true);
+  page.on('request', (r) => { if (!/^(file|data|blob):/.test(r.url())) erreurs.push(`requête réseau : ${r.url()}`); });
 
   const capture = (nom) => page.screenshot({ path: join(SORTIE, `${o.nom}-${nom}.png`) });
   const etat = (fn, arg) => page.evaluate(fn, arg);
@@ -78,6 +80,14 @@ async function scenario(browser, o) {
   await page.waitForTimeout(800);
   verifier(await page.isVisible('[data-cmd="nouvelle-partie"]'), 'écran titre : pas de bouton « Nouvelle partie »');
   verifier(!(await page.$('[data-cmd="continuer-partie"]')), 'écran titre : « Continuer » sans sauvegarde');
+  // les polices embarquées sont chargées (hors ligne) et servent vraiment au titre
+  const polices = await etat(async () => {
+    await document.fonts.ready;
+    const charge = (f) => [...document.fonts].some((x) => x.family.replace(/["']/g, '') === f && x.status === 'loaded');
+    return { cinzel: charge('Cinzel'), inter: charge('Inter'), titre: getComputedStyle(document.querySelector('.titre h1')).fontFamily };
+  });
+  verifier(polices.cinzel && polices.inter, `polices embarquées non chargées : ${JSON.stringify(polices)}`);
+  verifier(/^"?Cinzel/.test(polices.titre), `le titre n'utilise pas Cinzel : ${polices.titre}`);
   await capture('1-titre');
 
   // --- nouvelle partie, actions ---------------------------------------------------------------

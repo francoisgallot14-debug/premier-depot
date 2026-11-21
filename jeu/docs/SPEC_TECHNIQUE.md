@@ -41,6 +41,7 @@ jeu/
       panels.js   bottom sheets: Actions, Construire, Armée, Bâtiment (selected), Royaume (talents), Bilan, title, options, modals
       tutorial.js short contextual hints for the first cycles (can be turned off)
     main.js     boot, title screen, phase machine (title → prep → battle → report → prep… / defeat / victory), wiring
+  assets/fonts/               Cinzel + Inter (woff2 latin, OFL licences), inlined by the build
   scripts/build.mjs           esbuild bundle → dist/royaume.html (full standalone document) + dist/artifact.html (fragment, see §8)
   tests/core.test.mjs         node:test unit tests of core
   tests/balance.mjs           headless bot strategies over 10 waves → table
@@ -160,7 +161,8 @@ Units positions in **tile coordinates as floats** (renderer converts). Speeds in
 - Enemy types (data.js): `pillard` (hp 20, dmg 3, cadence 1 s, speed 1.2), `soudard` (hp 40, dmg 5, speed 1.0),
   `archer_ennemi` (hp 18, dmg 4, range 4, targets soldiers then towers), `belier` (battering ram: hp 150,
   dmg 25 vs buildings only, speed 0.6, ignores soldiers), `chef_de_guerre` (boss: hp 400, dmg 12, speed 0.9).
-- Waves 1–10 in data.js: list of `{type, count}` + spawn interval. Wave 1: 4 pillards. Ramp so that a
+- Waves 1–10 in data.js: list of `{type, count}` + spawn interval (+ optional `force` × enemy HP and
+  `forceDegats` × enemy damage against soldiers). Wave 1: 4 pillards. Ramp so that a
   sensible player wins all 10 with some tension; wave 10 includes the chef de guerre.
 - Blocking: if the next path tile has a non-destroyed building with `bloqueRoute`, the enemy stops in
   front and attacks it. Palissade/mur on grass does not block (they're decor-ish there; still targetable
@@ -219,14 +221,15 @@ meta = { version:1, xp, level, talentPoints, talents: [id], reserves:{bois,pierr
 - esbuild bundles `src/main.js` (+ three) into one minified IIFE; CSS inlined.
 - `dist/royaume.html`: complete standalone document (`<!doctype html>`, `<meta charset>`, viewport meta with
   `viewport-fit=cover`, title, style, script). Must work opened via `file://` (no fetch, no modules, no
-  external requests required). Google Fonts link allowed but the game must look fine without it (fallback stack).
+  external requests at all). Fonts (Cinzel, Inter: latin woff2 subsets, OFL) live in `assets/fonts/` and
+  the build inlines them as base64 `data:` URIs; a fallback stack stays behind them.
 - `dist/artifact.html`: same game as a **fragment** for claude.ai hosting: no `<!doctype>`, `<html>`,
   `<head>`, `<body>` tags; starts with `<title>Projet Royaume</title>`,
   `<meta name="claude:viewport-fit-sides" content="cover">`, then `<style>`, then markup, then `<script>`.
   Constraints of that host: no service workers, no alert/confirm/prompt (they do nothing) — so the game
   must never use them anywhere (build in-page confirmations), localStorage may throw (wrapped),
   `html, body { height: 100% }` instead of `100vh`, root padding for safe areas is applied by the host.
-- Both outputs from one template so they never diverge. Build must print sizes. Target < 1.2 MB each.
+- Both outputs from one template so they never diverge. Build must print sizes. Target < 1.1 MB each.
 
 ## 9. Rendering (three r170) — look & performance
 
@@ -304,7 +307,9 @@ meta = { version:1, xp, level, talentPoints, talents: [id], reserves:{bois,pierr
   talents/missions, battle determinism with same seed, wave 1 won with starting army + a palissade on the road).
 - `npm run balance`: bots over 10 waves, print a table per wave (survived?, soldiers lost, buildings lost,
   resources). Bots: `passif` (no defence, should lose early), `raisonnable` (simple sensible build order,
-  should win all 10 with some losses), `econome` (economy first, defends late).
+  should win ≥ 90 % of seeds with some losses), `econome` (economy first, defends late). Bots pull traps
+  like a human (reaction 1.5–3 s seeded, ≥ 2 enemies or a big target, sometimes forget), never every
+  1/30 s; `sans_pieges` (no traps at all) must still win sometimes, `parfait` (robot reflexes) is a ceiling.
 - `npm run build` then `npm run smoke`: Playwright loads `dist/royaume.html` via file:// in portrait and
   landscape, starts a new game, spends actions, builds a bûcheron + palissade on the road, assigns a
   worker, launches wave 1, uses speed ×2 and a trap/army move, waits for the report, continues, reloads

@@ -5,10 +5,10 @@ import * as C from './core/index.js';
 import { createRenderer } from './render/scene.js';
 import { createCameraController } from './render/camera.js';
 import { createWorld } from './render/world.js';
-import { createHud } from './ui/hud.js';
+import { createHud, MAX_REPERES } from './ui/hud.js';
 import { createPanels, prenom, resumeVague, accordSoldat, accordBatiment } from './ui/panels.js';
 import { createTutorial } from './ui/tutorial.js';
-import { el, esc, pluriel } from './ui/dom.js';
+import { el, esc, pluriel, reduceMotion } from './ui/dom.js';
 
 const NOMS_RES = { bois: 'Bois', pierre: 'Pierre', nourriture: 'Nourriture' };
 
@@ -69,6 +69,8 @@ function demarrer() {
     selected: null,   // id du bâtiment sélectionné
     usedMove: false,
     usedTrap: false,
+    finRoyaume: false, // panneau Royaume ouvert depuis l'écran de victoire / défaite
+    intro: null,      // travelling du début de vague : { t, de, entree, fin } (voir introBataille)
     warnedStorage: false,
     tutoT: 0,
   };
@@ -172,6 +174,7 @@ function demarrer() {
     });
     const h = tuto.el.hidden ? 0 : tuto.el.offsetHeight + 8;
     app.style.setProperty('--conseil-h', h + 'px');
+    if (G.battle) zonesLibres(); // un conseil apparu ou fermé change la bande libre (chevrons, pièges)
   }
 
   /** Haut de la zone de carte libre (sous le bandeau et sous le conseil affiché), en pixels de la toile. */
@@ -203,6 +206,7 @@ function demarrer() {
   }
 
   function showTitle() {
+    G.intro = null;
     G.screen = 'titre';
     app.dataset.ecran = 'titre';
     finPause();
@@ -243,12 +247,9 @@ function demarrer() {
     if (s.phase === 'report' && s.lastReport) {
       hud.setMode('fin');
       panels.openReport(s.lastReport, meta, s);
-    } else if (s.phase === 'defeat' && s.lastReport) {
+    } else if ((s.phase === 'defeat' || s.phase === 'victory') && s.lastReport) {
       hud.setMode('fin');
-      panels.openDefeat(s.lastReport, meta);
-    } else if (s.phase === 'victory' && s.lastReport) {
-      hud.setMode('fin');
-      panels.openVictory(s.lastReport, meta, s);
+      ouvrirFin();
     } else {
       if (s.phase !== 'prep') s.phase = 'prep';
       hud.setMode('prep');
@@ -274,8 +275,29 @@ function demarrer() {
   // ------------------------------------------------------------------ feuilles et sélection
   function closeSheet() {
     if (G.screen === 'titre' && panels.sheet) { panels.showTitle(); cam.setAutoRotate(0.05); } // Royaume ouvert depuis l'écran titre
+    const finRoyaume = G.finRoyaume && panels.sheet === 'royaume';
+    G.finRoyaume = false;
     panels.closeSheet();
     if (G.selected !== null) { G.selected = null; world.setSelected(null); }
+    if (finRoyaume) ouvrirFin(); // Royaume ouvert depuis la victoire ou la défaite : on y revient
+  }
+
+  /** Écran de fin de partie (défaite ou victoire) d'après le dernier rapport. */
+  function ouvrirFin() {
+    const s = G.state;
+    if (!s || !s.lastReport || G.screen !== 'jeu') return;
+    if (s.phase === 'defeat') panels.openDefeat(s.lastReport, meta);
+    else if (s.phase === 'victory') panels.openVictory(s.lastReport, meta, s);
+  }
+
+  /** « Royaume » depuis la victoire ou la défaite : la fenêtre laisse la place au panneau des talents. */
+  function royaumeDepuisFin() {
+    const s = G.state;
+    if (!s || (s.phase !== 'defeat' && s.phase !== 'victory')) return;
+    panels.closeAllModals();
+    endModes();
+    panels.openSheet('royaume');
+    G.finRoyaume = true;
   }
   function toggleSheet(name) {
     if (panels.sheet === name) { closeSheet(); return; }
@@ -522,8 +544,54 @@ function demarrer() {
     tutoCheck(); // les conseils de préparation s'effacent avant de cadrer
     const der = G.battle.waveNumber === s.wavesTotal;
     hud.banner(`Vague ${G.battle.waveNumber}`, der ? 'La dernière : le chef de guerre arrive !' : 'Ils arrivent par la route !');
-    cadrerBataille(G.battle);
+    introBataille(cadrerBataille(G.battle));
   }
+
+  // --- travelling du début de vague : l'entrée de la route, puis la route jusqu'aux défenses ------
+  // En portrait, le cadrage de bataille montre les défenses et le village : l'entrée de la route est
+  // hors de l'écran. On y passe donc d'abord (l'ennemi apparaît), puis on redescend jusqu'au combat.
+  // Toucher l'écran l'interrompt ; « mouvements réduits » le supprime.
+  const INTRO = { aller: 0.9, pause: 1.2, retour: 2.3 }; // secondes (temps réel)
+  const lisse = (t) => (t < 0.5 ? 2 * t * t : 1 - ((-2 * t + 2) ** 2) / 2);
+
+  function introBataille(fin) {
+    G.intro = null;
+    const entree = reduceMotion() ? null : cadrerTuiles(map.path.slice(0, 6), true);
+    // mouvements réduits, ou entrée déjà dans le cadre du combat (grande vue) : directement au combat
+    if (!entree || Math.hypot(entree.x - fin.x, entree.z - fin.z) < 6) {
+      cam.setTarget(fin.x, fin.z);
+      cam.setDistance(fin.distance);
+      return;
+    }
+    const c = cam.getState();
+    G.intro = { t: 0, de: { x: c.x, z: c.z, distance: c.distance }, entree, fin };
+  }
+
+  function majIntro(dt) {
+    const it = G.intro;
+    it.t += dt;
+    const { aller, pause, retour } = INTRO;
+    let a;
+    let b;
+    let k;
+    if (it.t < aller) { a = it.de; b = it.entree; k = lisse(it.t / aller); } else if (it.t < aller + pause) { a = b = it.entree; k = 1; } else {
+      a = it.entree; b = it.fin; k = lisse(Math.min(1, (it.t - aller - pause) / retour));
+    }
+    cam.setTarget(a.x + (b.x - a.x) * k, a.z + (b.z - a.z) * k, true);
+    cam.setDistance(a.distance + (b.distance - a.distance) * k, true);
+    if (it.t >= aller + pause + retour) G.intro = null;
+  }
+
+  /** Fin du travelling (le joueur touche l'écran, ou une commande) : la caméra file vers le combat. */
+  function finIntro() {
+    if (!G.intro) return;
+    const f = G.intro.fin;
+    G.intro = null;
+    cam.setTarget(f.x, f.z);
+    cam.setDistance(f.distance);
+  }
+  canvas.addEventListener('pointerdown', finIntro);
+  canvas.addEventListener('wheel', finIntro, { passive: true });
 
   /**
    * Cadre la bataille sur les défenses, entre le bandeau du haut et la barre de bataille.
@@ -561,39 +629,50 @@ function demarrer() {
       [drapeau, ...combat],
       combat,
     ];
+    const zones = zonesBataille();
+    let f = null;
+    for (const tuiles of essais) {
+      f = cadrerTuiles(tuiles, false, zones);
+      if (f.fits) break;
+    }
+    // même le lieu du combat ne tient pas de près : on recule autant qu'il faut, centré sur lui
+    if (!f.fits) f = cadrerTuiles(combat, false, zones, Infinity);
+    // (l'orientation choisie par le joueur est gardée) ; l'appelant applique le cadrage
+    return f;
+  }
+
+  /** Zones libres de l'écran en bataille (entre le bandeau et la barre de bataille), en px de la toile. */
+  function zonesBataille() {
     const r = canvas.getBoundingClientRect();
     const bas = hud.els.battlebar.getBoundingClientRect().top - r.top - 8;
     // marges : les boutons de pièges (44 px) restent entiers
     const zones = [{ left: 30, right: r.width - 30, top: hautLibre() + 28, bottom: bas, width: r.width, height: r.height }];
-    const portrait = isPortrait();
     // écran couché : le conseil n'occupe que la gauche ; la bande à sa droite, plus haute, sert aussi
-    if (!portrait && !tuto.el.hidden && !hud.els.hud.hidden) {
+    if (!isPortrait() && !tuto.el.hidden && !hud.els.hud.hidden) {
       const c = tuto.el.getBoundingClientRect();
       zones.push({ left: c.right - r.left + 12, right: r.width - 30, top: hud.els.hud.getBoundingClientRect().bottom - r.top + 12, bottom: bas, width: r.width, height: r.height });
     }
-    // distances : pas trop près (garder du contexte), pas trop loin (soldats lisibles ; l'écran couché est bas)
-    const dMin = portrait ? 30 : 20;
+    return zones;
+  }
+
+  /**
+   * Cadre ces tuiles dans la zone libre (sans rien appliquer). Distances : pas trop près (garder du
+   * contexte), pas trop loin (soldats lisibles ; l'écran couché est bas).
+   * @returns {{x:number, z:number, distance:number, fits:boolean}}
+   */
+  function cadrerTuiles(tuiles, serre = false, zones = zonesBataille(), dMax = null) {
+    const portrait = isPortrait();
+    const dMin = serre ? (portrait ? 26 : 18) : (portrait ? 30 : 20);
     const dConfort = portrait ? 40 : 23; // couché : comme le cadrage du village (23)
-    const cadrer = (tuiles, dMax) => {
-      const pts = pointsDeTuiles(tuiles);
-      let meilleur = null;
-      for (const z of zones) {
-        if (z.right - z.left < 120 || z.bottom - z.top < 80) continue;
-        const f = cam.fitPoints(pts, z, dMin, dMax);
-        if (!meilleur || (f.fits && (!meilleur.fits || f.distance < meilleur.distance))) meilleur = f;
-      }
-      return meilleur || cam.fitPoints(pts, zones[0], dMin, dMax);
-    };
-    let f = null;
-    for (const tuiles of essais) {
-      f = cadrer(tuiles, dConfort);
-      if (f.fits) break;
+    const max = dMax ?? dConfort;
+    const pts = pointsDeTuiles(tuiles);
+    let meilleur = null;
+    for (const z of zones) {
+      if (z.right - z.left < 120 || z.bottom - z.top < 80) continue;
+      const f = cam.fitPoints(pts, z, dMin, max);
+      if (!meilleur || (f.fits && (!meilleur.fits || f.distance < meilleur.distance))) meilleur = f;
     }
-    // même le lieu du combat ne tient pas de près : on recule autant qu'il faut, centré sur lui
-    if (!f.fits) f = cadrer(combat, Infinity);
-    // (l'orientation choisie par le joueur est gardée)
-    cam.setTarget(f.x, f.z);
-    cam.setDistance(f.distance);
+    return meilleur || cam.fitPoints(pts, zones[0], dMin, max);
   }
 
   /** Coins des tuiles (± marge en tuiles), au sol et à hauteur d'homme : ce que la caméra doit voir. */
@@ -635,6 +714,7 @@ function demarrer() {
   }
 
   function endBattle() {
+    G.intro = null;
     const s = G.state;
     const b = G.battle;
     const report = C.finishBattle(s, b, meta);
@@ -646,8 +726,7 @@ function demarrer() {
     world.syncState(s);
     hud.setMode('fin');
     frameVillage();
-    if (s.phase === 'defeat') panels.openDefeat(report, meta);
-    else if (s.phase === 'victory') panels.openVictory(report, meta, s);
+    if (s.phase === 'defeat' || s.phase === 'victory') ouvrirFin();
     else panels.openReport(report, meta, s);
     refresh();
   }
@@ -807,6 +886,7 @@ function demarrer() {
 
   // ------------------------------------------------------------------ commandes de l'interface
   function cmd(name, d = {}) {
+    if (G.intro && name !== 'info-chip') finIntro(); // le joueur agit : le travelling s'efface
     const s = G.state;
     const enPrep = s && s.phase === 'prep' && G.screen === 'jeu';
     switch (name) {
@@ -840,7 +920,9 @@ function demarrer() {
       case 'drapeau-fin': endModes(); break;
       case 'talent-voir': panels.selectTalent(d.id); break;
       case 'talent': {
-        const r = C.buyTalent(meta, d.id, G.state && G.state.phase !== 'battle' ? G.state : null);
+        // partie finie (défaite, victoire) : le talent servira à la suivante, pas à celle-ci
+        const enCours = G.state && !['battle', 'defeat', 'victory'].includes(G.state.phase);
+        const r = C.buyTalent(meta, d.id, enCours ? G.state : null);
         if (r.ok) {
           saveMeta();
           if (G.state) save();
@@ -854,6 +936,7 @@ function demarrer() {
       case 'pause': G.paused = !G.paused; G.menuPaused = false; hud.setPaused(G.paused); break;
       case 'deplacer': if (G.battle) toggleMoveArmy(); break;
       case 'piege': fireTrap(+d.id); break;
+      case 'repere': voirRepere(+d.i); break;
       // menus
       case 'menu': if (G.screen === 'jeu') openMenu(); break;
       case 'options': panels.openOptions(); break;
@@ -869,6 +952,7 @@ function demarrer() {
       case 'continuer-partie': continueGame(); break;
       case 'nouvelle-partie': askNewGame(); break;
       case 'titre-royaume': panels.hideTitle(); toggleSheet('royaume'); break;
+      case 'fin-royaume': royaumeDepuisFin(); break;
       case 'recommencer': newGame(); break;
       case 'titre': askToTitle(); break;
       case 'info-chip': chipInfo(d.chip); break;
@@ -881,10 +965,20 @@ function demarrer() {
   const trapOut = [];
   let zoneHaut = 0;
   let zoneBas = 0;
+  const conseilZone = { on: false, l: 0, t: 0, r: 0, b: 0 }; // conseil affiché (px de la toile)
+  /** Bande libre de la carte en bataille (sous le bandeau, au-dessus de la barre) et place du conseil. */
   function zonesLibres() {
-    zoneHaut = hud.els.hud.getBoundingClientRect().bottom - canvas.getBoundingClientRect().top;
-    zoneBas = hud.els.battlebar.getBoundingClientRect().top - canvas.getBoundingClientRect().top - 10;
+    const rc = canvas.getBoundingClientRect();
+    zoneHaut = hud.els.hud.getBoundingClientRect().bottom - rc.top;
+    zoneBas = hud.els.battlebar.getBoundingClientRect().top - rc.top - 10;
+    conseilZone.on = !tuto.el.hidden;
+    if (conseilZone.on) {
+      const c = tuto.el.getBoundingClientRect();
+      conseilZone.l = c.left - rc.left; conseilZone.r = c.right - rc.left;
+      conseilZone.t = c.top - rc.top; conseilZone.b = c.bottom - rc.top;
+    }
   }
+  const sousConseil = (x, y, m) => conseilZone.on && x > conseilZone.l - m && x < conseilZone.r + m && y > conseilZone.t - m && y < conseilZone.b + m;
   window.addEventListener('resize', () => setTimeout(() => { if (G.battle) zonesLibres(); }, 50));
 
   // Objets réutilisés d'une image à l'autre (aucune allocation par image pendant la bataille).
@@ -913,6 +1007,80 @@ function demarrer() {
     vueBataille.over = b.over;
     vueBataille.count = n;
     hud.updateBattle(vueBataille);
+    hud.updateReperes(reperes, calculerReperes(b));
+  }
+
+  // Ennemis hors de l'écran : regroupés par endroit du bord où ils sortent (objets réutilisés).
+  const reperes = Array.from({ length: MAX_REPERES }, () => ({ x: 0, y: 0, angle: 0, count: 0, dx: 0, dy: 0, tx: 0, tz: 0 }));
+  const _ps = { x: 0, y: 0, visible: false, behind: false };
+  const REPERE = { marge: 36, regroupe: 64 }; // px : distance au bord (la pointe reste entière), écart sous lequel deux groupes n'en font qu'un
+  function calculerReperes(b) {
+    if (G.intro || b.over) return 0;
+    const w = canvas.clientWidth;
+    const m = REPERE.marge;
+    const gauche = m;
+    const droite = w - m;
+    const haut = zoneHaut + m;
+    const bas = zoneBas - m;
+    if (droite - gauche < 60 || bas - haut < 60) return 0;
+    const cx = (gauche + droite) / 2;
+    const cy = (haut + bas) / 2;
+    // un conseil sur toute la largeur (portrait) cache vraiment le haut de la carte ; un conseil
+    // dans un coin (paysage) ne cache presque rien : on le contourne seulement
+    const conseilLarge = conseilZone.on && conseilZone.r - conseilZone.l > 0.7 * w;
+    let n = 0;
+    for (const u of b.units) {
+      if (u.side !== 'enemy' || u.state === 'dead') continue;
+      world.tileToScreen(u.x, u.z, 0.8, _ps);
+      // visible : dans la toile, entre le bandeau et la barre (et pas sous un conseil pleine largeur)
+      if (_ps.visible && _ps.x >= 8 && _ps.x <= w - 8 && _ps.y >= zoneHaut + 8 && _ps.y <= zoneBas - 8
+        && !(conseilLarge && sousConseil(_ps.x, _ps.y, 0))) continue;
+      let dx = _ps.x - cx;
+      let dy = _ps.y - cy;
+      if (_ps.behind) { dx = -dx; dy = -dy; }
+      const l = Math.hypot(dx, dy);
+      if (l < 1e-6) continue;
+      // point du bord de la zone libre dans la direction du groupe
+      const kx = dx > 0 ? (droite - cx) / dx : dx < 0 ? (gauche - cx) / dx : Infinity;
+      const ky = dy > 0 ? (bas - cy) / dy : dy < 0 ? (haut - cy) / dy : Infinity;
+      const k = Math.min(kx, ky);
+      let ex = cx + dx * k;
+      let ey = cy + dy * k;
+      // jamais caché par le conseil : dessous s'il prend toute la largeur ou si l'on est sur le bord
+      // gauche, sinon à sa droite (bord du haut)
+      if (sousConseil(ex, ey, m - 8)) {
+        if (conseilLarge || ey > haut + 1) ey = Math.min(bas, conseilZone.b + m);
+        else ex = Math.min(droite, conseilZone.r + m);
+      }
+      // même endroit du bord qu'un repère déjà posé : il compte un ennemi de plus
+      let r = null;
+      let best = Infinity;
+      for (let i = 0; i < n; i++) {
+        const d = Math.hypot(reperes[i].x / reperes[i].count - ex, reperes[i].y / reperes[i].count - ey);
+        if (d < best) { best = d; r = reperes[i]; }
+      }
+      if (!r || (best > REPERE.regroupe && n < MAX_REPERES)) {
+        r = reperes[n++];
+        r.x = r.y = r.dx = r.dy = r.tx = r.tz = 0;
+        r.count = 0;
+      }
+      r.x += ex; r.y += ey; r.dx += dx / l; r.dy += dy / l; r.tx += u.x; r.tz += u.z;
+      r.count++;
+    }
+    for (let i = 0; i < n; i++) {
+      const r = reperes[i];
+      r.x /= r.count; r.y /= r.count; r.tx /= r.count; r.tz /= r.count;
+      r.angle = Math.atan2(r.dy, r.dx);
+    }
+    return n;
+  }
+
+  /** Toucher un chevron : la caméra va voir ce groupe d'ennemis. */
+  function voirRepere(i) {
+    const r = reperes[i];
+    if (!G.battle || !r || !r.count) return;
+    const w = C.tileToWorld(r.tx, r.tz);
+    cam.setTarget(w.wx, w.wz);
   }
 
   ctx.start((dt) => {
@@ -937,6 +1105,7 @@ function demarrer() {
       G.tutoT += dt;
       if (G.tutoT > 0.5) { G.tutoT = 0; tutoCheck(); }
     }
+    if (G.intro) majIntro(dt);
     cam.update(dt);
     ctx.setFogForDistance(cam.getState().distance);
     world.update(G.paused && G.battle ? 0 : dt); // la pause ne fige que la bataille
@@ -951,6 +1120,8 @@ function demarrer() {
     get mode() { return G.mode; },
     get sheet() { return panels.sheet; },
     get speed() { return G.speed; },
+    /** Vrai pendant le travelling du début de vague. */
+    get intro() { return !!G.intro; },
     /** Caméra (cible, distance, orientation) : vérifier un cadrage. */
     get camera() { return cam.getState(); },
     /** Position écran (px) du centre d'une tuile. */

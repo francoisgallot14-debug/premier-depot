@@ -1,0 +1,7 @@
+Polices du jeu (glissées dans dist/*.html par « npm run build » : le jeu n'a besoin d'aucune connexion)
+
+  cinzel-latin.woff2  Cinzel (titres), police variable 400–900, sous-ensemble latin (Google Fonts, v26)
+  inter-latin.woff2   Inter (texte), police variable 100–900, sous-ensemble latin (Google Fonts, v20)
+
+Les deux sont sous licence SIL Open Font License 1.1 : voir OFL-Cinzel.txt et OFL-Inter.txt.
+On peut les utiliser, les embarquer et les redistribuer avec le jeu, à condition de garder ces licences.

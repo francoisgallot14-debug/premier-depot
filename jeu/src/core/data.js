@@ -475,7 +475,7 @@ export const ENNEMIS = {
   },
   chef_de_guerre: {
     nom: 'Chef de guerre',
-    pv: 400, degats: 12, cadence: 1.2, vitesse: 0.9, portee: 1.0,
+    pv: 320, degats: 9, cadence: 1.2, vitesse: 0.9, portee: 1.0, // un sommet, pas un mur : 9 dégâts (12 tuaient toute l'armée)
     resistanceTours: 0.5, // bouclier et armure : les tours seules ne suffisent pas
     cible: 'tout', taille: 1.4,
   },
@@ -484,7 +484,11 @@ export const ENNEMIS = {
 // ---------------------------------------------------------------------
 //  Vagues du chapitre 1 : les groupes arrivent dans l'ordre de la liste,
 //  un ennemi toutes les « intervalle » secondes.
-//  force (facultatif) : multiplie les PV des ennemis de la vague (1 = normal).
+//  force (facultatif)       : multiplie les PV des ennemis de la vague (1 = normal).
+//  forceDegats (facultatif) : multiplie les dégâts des ennemis contre nos soldats (1 = normal) ;
+//                             les murs n'y sont pas sensibles. Ce sont les vagues 6 à 9 qui usent l'armée.
+//  Rampe visée (npm run balance) : premiers soldats perdus vers la vague 6, puis un peu plus à chaque
+//  vague ; la 10e est la plus dure (le chef de guerre) sans être un mur.
 // ---------------------------------------------------------------------
 export const VAGUES = [
   { // 1 : de quoi coûter un soldat à qui ne prépare rien
@@ -508,30 +512,35 @@ export const VAGUES = [
     intervalle: 1.6,
     force: 1.1,
   },
-  { // 6
+  { // 6 : des vétérans qui frappent fort : les premiers soldats tombent
     groupes: [{ type: 'pillard', count: 5 }, { type: 'archer_ennemi', count: 3 }, { type: 'soudard', count: 5 }, { type: 'belier', count: 1 }, { type: 'pillard', count: 4 }],
     intervalle: 1.5,
-    force: 1.2,
+    force: 1.3,
+    forceDegats: 1.6,
   },
   { // 7
     groupes: [{ type: 'soudard', count: 4 }, { type: 'pillard', count: 5 }, { type: 'belier', count: 1 }, { type: 'archer_ennemi', count: 4 }, { type: 'soudard', count: 3 }, { type: 'belier', count: 1 }, { type: 'pillard', count: 4 }],
     intervalle: 1.4,
-    force: 1.35,
+    force: 1.4,
+    forceDegats: 1.6,
   },
   { // 8
     groupes: [{ type: 'pillard', count: 6 }, { type: 'soudard', count: 5 }, { type: 'archer_ennemi', count: 5 }, { type: 'belier', count: 2 }, { type: 'soudard', count: 4 }, { type: 'pillard', count: 5 }],
     intervalle: 1.3,
     force: 1.5,
+    forceDegats: 1.6,
   },
-  { // 9
+  { // 9 : trois béliers, les murs souffrent
     groupes: [{ type: 'soudard', count: 5 }, { type: 'pillard', count: 6 }, { type: 'archer_ennemi', count: 6 }, { type: 'belier', count: 2 }, { type: 'soudard', count: 5 }, { type: 'belier', count: 1 }, { type: 'pillard', count: 6 }],
     intervalle: 1.2,
-    force: 1.7,
+    force: 1.6,
+    forceDegats: 1.6,
   },
-  { // 10 : le chef de guerre arrive en dernier, avec sa garde
-    groupes: [{ type: 'pillard', count: 6 }, { type: 'soudard', count: 5 }, { type: 'archer_ennemi', count: 6 }, { type: 'belier', count: 2 }, { type: 'soudard', count: 5 }, { type: 'pillard', count: 4 }, { type: 'chef_de_guerre', count: 1 }, { type: 'soudard', count: 3 }],
+  { // 10 : le chef de guerre arrive en dernier, avec sa garde. Un peu moins de force que la 9 :
+    //      le chef suffit à en faire la vague la plus dure (avant, c'était un mur : toute l'armée y restait).
+    groupes: [{ type: 'pillard', count: 7 }, { type: 'soudard', count: 4 }, { type: 'archer_ennemi', count: 6 }, { type: 'belier', count: 2 }, { type: 'soudard', count: 4 }, { type: 'pillard', count: 6 }, { type: 'chef_de_guerre', count: 1 }, { type: 'soudard', count: 2 }],
     intervalle: 1.2,
-    force: 1.85, // la dernière : un vrai siège
+    force: 1.5,
   },
 ];
 

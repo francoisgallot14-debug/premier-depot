@@ -10,7 +10,7 @@ import { dirname, join } from 'node:path';
 
 const RACINE = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = join(RACINE, 'dist');
-const LIMITE = 1.2 * 1024 * 1024; // taille visée par fichier
+const LIMITE = 1.1 * 1024 * 1024; // taille visée par fichier (polices comprises)
 const TITRE = 'Projet Royaume';
 
 // 1. Script : un seul IIFE minifié (aucun module, aucun chargement externe)
@@ -28,8 +28,18 @@ const js = await build({
 // un « </script » dans le code fermerait la balise trop tôt
 const script = js.outputFiles[0].text.replace(/<\/script/gi, '<\\/script').trim();
 
-// 2. Style : le même fichier qu'en développement, minifié
-const css = (await transform(readFileSync(join(RACINE, 'src', 'ui', 'style.css'), 'utf8'), { loader: 'css', minify: true })).code.trim();
+// 2. Style : le même fichier qu'en développement, minifié. Les polices (assets/fonts/) y entrent
+//    en data: (base64) : le jeu les a même hors ligne, sans aucune requête.
+let fontes = 0;
+const styleSource = readFileSync(join(RACINE, 'src', 'ui', 'style.css'), 'utf8')
+  .replace(/url\((['"]?)\.\.\/\.\.\/assets\/fonts\/([\w.-]+\.woff2)\1\)/g, (_, _q, nom) => {
+    fontes++;
+    return `url(data:font/woff2;base64,${readFileSync(join(RACINE, 'assets', 'fonts', nom)).toString('base64')})`;
+  });
+const css = (await transform(styleSource, { loader: 'css', minify: true })).code.trim();
+// garde-fou : rien ne doit partir sur le réseau (le jeu se joue hors ligne)
+if (/@import|url\(\s*['"]?(https?:)?\/\//i.test(css)) throw new Error('style.css : ressource externe (@import ou url distante) interdite');
+if (fontes === 0) throw new Error('style.css : polices de assets/fonts/ introuvables');
 
 // 3. Balisage partagé avec index.html
 const index = readFileSync(join(RACINE, 'index.html'), 'utf8');
@@ -75,7 +85,7 @@ for (const [nom, contenu] of sorties) {
   if (!ok) trop = true;
   console.log(`${ok ? 'OK ' : 'TROP'} dist/${nom.padEnd(14)} ${ko.padStart(8)} Ko`);
 }
-console.log(`     (script ${(script.length / 1024).toFixed(1)} Ko, style ${(css.length / 1024).toFixed(1)} Ko)`);
+console.log(`     (script ${(script.length / 1024).toFixed(1)} Ko, style ${(css.length / 1024).toFixed(1)} Ko dont ${fontes} polices)`);
 if (trop) {
   console.error(`Un fichier dépasse ${(LIMITE / 1024 / 1024).toFixed(1)} Mo.`);
   process.exit(1);

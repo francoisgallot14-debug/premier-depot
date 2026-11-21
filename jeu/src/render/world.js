@@ -70,8 +70,8 @@ function sideOf(v) {
  * @property {() => void} clearGhost Retire le fantôme et la grille.
  * @property {(tiles: {x: number, z: number}[]|null) => void} setHints Surligne les cases possibles (mode construction).
  * @property {(clientX: number, clientY: number) => ({x: number, z: number}|null)} pickTile Tuile sous le doigt.
- * @property {(x: number, z: number, height?: number, out?: object) => {x: number, y: number, visible: boolean}} tileToScreen
- *   Position écran (px CSS relatifs à la toile) d'une tuile, pour ancrer un bouton.
+ * @property {(x: number, z: number, height?: number, out?: object) => {x: number, y: number, visible: boolean, behind: boolean}} tileToScreen
+ *   Position écran (px CSS relatifs à la toile) d'une tuile (coordonnées décimales permises), pour ancrer un bouton.
  * @property {(x: number, z: number, animate?: boolean) => void} setRally Déplace le drapeau de ralliement.
  * @property {(on: boolean) => void} showRallyRange Cercle d'action de l'armée (mode « Déplacer l'armée »).
  * @property {(x: number|null, z?: number) => void} setSelected Surligne une tuile (null pour effacer).
@@ -376,17 +376,19 @@ export function createWorld(scene, map, opts = {}) {
   for (let j = 0; j <= H; j++) gl.push(x0, 0.05, z0 + j * TILE, x0 + W * TILE, 0.05, z0 + j * TILE);
   const gridGeo = new THREE.BufferGeometry();
   gridGeo.setAttribute('position', new THREE.Float32BufferAttribute(gl, 3));
-  const gridMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.16, depthWrite: false });
+  // trait sombre et discret : un quadrillage blanc se confondait avec le contour des cases possibles
+  const gridMat = new THREE.LineBasicMaterial({ color: 0x1c2a0e, transparent: true, opacity: 0.22, depthWrite: false });
   const grid = new THREE.LineSegments(gridGeo, gridMat);
   grid.visible = false;
   grid.renderOrder = 2;
   root.add(grid);
 
-  // cases où le bâtiment choisi peut être posé (mode construction) : carrés dorés avec un contour
-  // clair, qui tranchent sur l'herbe verte (le tutoriel parle de « cases dorées »)
+  // cases où le bâtiment choisi peut être posé (mode construction) : carrés dorés au contour or plein,
+  // qui tranchent sur l'herbe verte (le tutoriel parle de « cases dorées »). Couleurs hors tone mapping :
+  // sinon l'or pâlit et, mêlé au vert de l'herbe, tourne au jaune-vert.
   const hintGeo = new THREE.PlaneGeometry(TILE * 0.84, TILE * 0.84);
   hintGeo.rotateX(-Math.PI / 2);
-  const hintMat = new THREE.MeshBasicMaterial({ color: 0xffc94a, transparent: true, opacity: 0.3, depthWrite: false });
+  const hintMat = new THREE.MeshBasicMaterial({ color: 0xffa814, transparent: true, opacity: 0.4, depthWrite: false, toneMapped: false });
   const hints = new THREE.InstancedMesh(hintGeo, hintMat, W * H);
   hints.count = 0;
   hints.frustumCulled = false;
@@ -394,9 +396,9 @@ export function createWorld(scene, map, opts = {}) {
   hints.visible = false;
   root.add(hints);
   // contour carré : anneau à 4 côtés tourné de 45°
-  const hintEdgeGeo = new THREE.RingGeometry(TILE * 0.6, TILE * 0.66, 4, 1, Math.PI / 4);
+  const hintEdgeGeo = new THREE.RingGeometry(TILE * 0.575, TILE * 0.66, 4, 1, Math.PI / 4);
   hintEdgeGeo.rotateX(-Math.PI / 2);
-  const hintEdgeMat = new THREE.MeshBasicMaterial({ color: 0xfff2c2, transparent: true, opacity: 0.8, depthWrite: false });
+  const hintEdgeMat = new THREE.MeshBasicMaterial({ color: 0xffc23a, transparent: true, opacity: 1, depthWrite: false, toneMapped: false });
   const hintEdges = new THREE.InstancedMesh(hintEdgeGeo, hintEdgeMat, W * H);
   hintEdges.count = 0;
   hintEdges.frustumCulled = false;
@@ -1289,8 +1291,8 @@ export function createWorld(scene, map, opts = {}) {
       selection.scale.set(s, 1, s);
     }
     if (hints.visible) {
-      hintMat.opacity = 0.28 + Math.sin(clock * 3) * 0.08;
-      hintEdgeMat.opacity = 0.7 + Math.sin(clock * 3) * 0.2;
+      hintMat.opacity = 0.36 + Math.sin(clock * 3) * 0.06; // respire doucement, sans jamais pâlir
+      hintEdgeMat.opacity = 0.9 + Math.sin(clock * 3) * 0.1;
     }
     if (ghost.visible) {
       ghostT += dt;
@@ -1340,6 +1342,7 @@ export function createWorld(scene, map, opts = {}) {
     out.x = (_v.x * 0.5 + 0.5) * rectToile.width;
     out.y = (-_v.y * 0.5 + 0.5) * rectToile.height;
     out.visible = _v.z < 1 && Math.abs(_v.x) <= 1 && Math.abs(_v.y) <= 1;
+    out.behind = _v.z > 1; // derrière la caméra : la position écran est inversée
     return out;
   }
 
