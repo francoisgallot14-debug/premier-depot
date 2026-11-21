@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <!-- Page de développement : les modules ES demandent un petit serveur local.
+       npx http-server -p 8765 .   puis ouvrir http://localhost:8765/
+       La version à jouer (un seul fichier, hors ligne) se fabrique avec « npm run build » → dist/royaume.html -->
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b1119">
+  <title>Projet Royaume</title>
+  <link rel="stylesheet" href="./src/ui/style.css">
+  <script type="importmap">{ "imports": { "three": "./node_modules/three/build/three.module.js" } }</script>
+</head>
+<body>
+<!-- balisage:debut -->
+<div id="royaume" class="app"><div class="boot">Projet Royaume<small>Chargement du village…</small></div></div>
+<noscript><p style="padding:24px;color:#f3ebdb;font-family:sans-serif">Projet Royaume a besoin de JavaScript pour fonctionner.</p></noscript>
+<!-- balisage:fin -->
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>

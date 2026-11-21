@@ -92,7 +92,8 @@ each returning `{ ok: true }` or `{ ok: false, reason: 'texte français lisible'
 ## 4. Rules (economy.js) — numbers are defaults; put them in data.js
 
 Resources: bois, pierre, nourriture. Storage cap per resource = Maison commune 100 + 100 per Entrepôt
-(+ talents). Gains above the cap are lost (report says so).
+(+ talents), never below `REGLES.stockageMinimum` (60) so a ruined Maison commune cannot soft-lock the
+game. Gains above the cap are lost (report says so).
 
 Start (chapter 1): Maison commune only; resources bois 30, pierre 10, nourriture 30 (+ meta reserves,
 capped); 5 villagers; 3 soldiers fantassin equip 0 (mains nues); actionsMax 5 (+ talents);
@@ -114,13 +115,13 @@ Buildings (1 tile each). Fields in data.js: `nom, description, categorie, cout{}
 | bucheron | Cabane de bûcheron | 15 bois | 60 | 2 emplois × 8 bois | herbe, ≤2 tuiles d'une forêt | start |
 | chasseur | Cabane de chasseur | 15 bois | 60 | 2 emplois × 6 nourriture | herbe, ≤2 tuiles d'une forêt | start |
 | carriere | Carrière | 20 bois | 80 | 2 emplois × 5 pierre | herbe, ≤2 tuiles d'un rocher | 1er bûcheron construit |
-| tour_guet | Tour de guet | 20 bois | 100 | tour portée 3.5 tuiles, 4 dégâts, 1 tir/s | herbe | 1er bûcheron construit |
+| tour_guet | Tour de guet | 25 bois | 100 | tour portée 3.5 tuiles, 3 dégâts, 1 tir/s | herbe | 1er bûcheron construit |
 | champ | Champ | 20 bois 5 pierre | 50 | 3 emplois × 7 nourriture | herbe | vague 3 terminée |
 | entrepot | Entrepôt | 25 bois 10 pierre | 100 | stockage +100 | herbe | 1re carrière |
 | caserne | Caserne | 30 bois 10 pierre | 150 | +5 places de soldats, permet de recruter | herbe | 1re carrière |
 | mur_pierre | Mur de pierre | 10 pierre | 220 | bloque la route | route ou herbe | 1re carrière |
 | atelier | Atelier d'armes | 25 bois 15 pierre | 120 | débloque lance, bouclier, arc | herbe | 1re caserne |
-| tour_pierre | Tour de pierre | 10 bois 20 pierre | 220 | tour portée 4.5, 6 dégâts, 0.9 s | herbe | 1er atelier |
+| tour_pierre | Tour de pierre | 10 bois 20 pierre | 220 | tour portée 4.5, 8 dégâts, 0.9 s | herbe | 1re carrière |
 | palissade | Palissade | 6 bois | 80 | bloque la route si posée sur la route | route ou herbe | start |
 | piege | Piège à pieux | 10 bois | — (non ciblable) | levier: 35 dégâts rayon 1 tuile, recharge 15 s | route uniquement | start |
 
@@ -134,6 +135,8 @@ Buildings (1 tile each). Fields in data.js: `nom, description, categorie, cout{}
   Archer: convert/recruit as archer needs Atelier, 8 bois. Stats in data.js, e.g. fantassin hp 30;
   dmg by tier 3/5/7/7; tier 3 +15 hp; archer hp 22, dmg 4, range 4 tiles.
 - Demolish (prep): refunds 50% (rounded down), frees workers. Maison commune cannot be demolished.
+  Refused if housing would drop below the population. Housing lost in battle: `REGLES.departsSansToit`
+  villager(s) leave at each report while over capacity (the report says so).
 - Damaged buildings are fully repaired for free at the end of each battle. Destroyed buildings become ruins
   (`destroyed: true`, keep position, workers freed, no effect, no housing) and can be rebuilt for the full
   cost from their panel. A ruin occupies its tile.
@@ -157,12 +160,18 @@ Units positions in **tile coordinates as floats** (renderer converts). Speeds in
 - Enemy types (data.js): `pillard` (hp 20, dmg 3, cadence 1 s, speed 1.2), `soudard` (hp 40, dmg 5, speed 1.0),
   `archer_ennemi` (hp 18, dmg 4, range 4, targets soldiers then towers), `belier` (battering ram: hp 150,
   dmg 25 vs buildings only, speed 0.6, ignores soldiers), `chef_de_guerre` (boss: hp 400, dmg 12, speed 0.9).
-- Waves 1–10 in data.js: list of `{type, count}` + spawn interval. Wave 1: 3 pillards. Ramp so that a
+- Waves 1–10 in data.js: list of `{type, count}` + spawn interval. Wave 1: 4 pillards. Ramp so that a
   sensible player wins all 10 with some tension; wave 10 includes the chef de guerre.
 - Blocking: if the next path tile has a non-destroyed building with `bloqueRoute`, the enemy stops in
   front and attacks it. Palissade/mur on grass does not block (they're decor-ish there; still targetable
   if adjacent to an enemy that has no other target).
 - Enemies engage soldiers within 1.5 tiles (melee) instead of walking on (except bélier).
+- Our walls: a standing road blocker between an enemy (before it on the path) and the army (rally after it)
+  is never crossed by our soldiers. Melee soldiers hold it from behind: they take a post just behind it
+  (`COMBAT.posteMur`) if that post is inside the leash, and strike enemies at its foot across it
+  (`COMBAT.allongeMur`); those enemies strike back across it the same way. Enemy archers do not shoot
+  soldiers over a standing wall (cover); our archers do shoot over it. `ENNEMIS.*.resistanceTours`
+  (bélier, chef de guerre) reduces tower-arrow damage only, so the army matters at the wall.
 - After the last path tile, enemies target the nearest non-destroyed building and attack it.
 - Soldiers stand around `rally` (formation offsets). They engage enemies within 3.5 tiles of the rally
   point, chase within that leash, return when no target. Archers keep distance and shoot (range).

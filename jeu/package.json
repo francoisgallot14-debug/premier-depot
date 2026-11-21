@@ -6,7 +6,7 @@
   "description": "Jeu de gestion médiéval et défense par vagues, en 3D, pour mobile (hors ligne).",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "node --test tests/",
+    "test": "node --test tests/*.test.mjs",
     "balance": "node tests/balance.mjs",
     "smoke": "node tests/smoke.mjs"
   },

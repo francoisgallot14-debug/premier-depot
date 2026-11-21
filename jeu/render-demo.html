@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <!-- Démo du rendu 3D seul (sans interface). Les modules ES exigent un petit serveur local :
+       npx http-server -p 8765 .   puis ouvrir http://localhost:8765/render-demo.html
+       Paramètres : ?mode=prep|battle|ghost|title|gallery  &wave=9&t=50  &freeze=1  &q=economie
+       &until=trap|building_destroyed  &selftest=1 (vérification automatique de l'API, résultat dans la console) -->
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Démo du rendu — Projet Royaume</title>
+  <style>
+    :root { color-scheme: dark; --fond: #10161f; --texte: #f3ead8; }
+    html, body { margin: 0; height: 100%; background: var(--fond); overflow: hidden; }
+    canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+    #info {
+      position: fixed; left: 8px; top: 8px; padding: 4px 8px; border-radius: 6px;
+      font: 12px/1.3 system-ui, sans-serif; color: var(--texte); background: rgba(16, 22, 31, 0.7);
+      pointer-events: none; display: none;
+    }
+  </style>
+  <script type="importmap">{ "imports": { "three": "./node_modules/three/build/three.module.js" } }</script>
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <div id="info"></div>
+  <script type="module" src="./src/render/demo.js"></script>
+</body>
+</html>
